@@ -201,7 +201,14 @@ class Factory
             $body = json_encode($body);
 
             $headers['Content-Type'] = 'application/json';
+        } elseif (is_int($body) || is_float($body)) {
+            $body = (string) $body;
         }
+
+        $headers = array_map(
+            fn (mixed $value): string|array => is_array($value) ? array_map(strval(...), $value) : (string) $value,
+            $headers,
+        );
 
         return new Psr7Response($status, $headers, $body);
     }

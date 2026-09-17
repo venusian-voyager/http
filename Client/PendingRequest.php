@@ -1025,6 +1025,8 @@ class PendingRequest
      */
     public function send(string $method, string $url, array $options = [])
     {
+        $method = strtoupper($method);
+
         if (! Str::startsWith($url, ['http://', 'https://'])) {
             $url = ltrim(rtrim($this->baseUrl, '/').'/'.ltrim($url, '/'), '/');
         }
