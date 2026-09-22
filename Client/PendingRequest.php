@@ -1016,9 +1016,9 @@ class PendingRequest
      * @param  string  $method
      * @param  string  $url
      * @param  array  $options
-     * @return \Voyager\Http\Client\Response|\Voyager\Http\Client\Promises\LazyPromise
+     * @return \Voyager\Http\Client\Response|\Voyager\Http\Client\Promises\LazyPromise|\Voyager\Contracts\IOPools\Promise
      *
-     * @phpstan-return (TAsync is false ? \Voyager\Http\Client\Response : \Voyager\Http\Client\Promises\LazyPromise)
+     * @phpstan-return (TAsync is false ? \Voyager\Http\Client\Response : \Voyager\Http\Client\Promises\LazyPromise|\Voyager\Contracts\IOPools\Promise)
      *
      * @throws \Exception
      * @throws \Voyager\Http\Client\ConnectionException
@@ -1038,9 +1038,19 @@ class PendingRequest
         [$this->pendingBody, $this->pendingFiles] = [null, []];
 
         if ($this->async) {
-            return $this->promise = new LazyPromise(
+            $this->promise = new LazyPromise(
                 fn () => $this->makePromise($method, $url, $options)
             );
+
+            // Pool and Batch hand in their own handler and build lazily to keep their concurrency cap.
+            // A bare async() send on a bound loop starts now, and a failure rejects instead of resolving to it.
+            if (is_null($this->handler) && ! is_null($loop = $this->factory?->loop())) {
+                return $loop->adopt($this->promise->buildPromise()->then(
+                    static fn ($result) => $result instanceof Throwable ? throw $result : $result
+                ));
+            }
+
+            return $this->promise;
         }
 
         $shouldRetry = null;
@@ -1393,7 +1403,7 @@ class PendingRequest
      *
      * @return \GuzzleHttp\Client
      */
-    public function buildClient()
+    public function buildClient(): Client
     {
         return $this->client ?? $this->createClient($this->buildHandlerStack());
     }
@@ -1439,7 +1449,9 @@ class PendingRequest
      */
     public function buildHandlerStack()
     {
-        return $this->pushHandlers(HandlerStack::create($this->handler));
+        return $this->pushHandlers(HandlerStack::create(
+            $this->handler ?? ($this->async ? $this->factory?->loopHandler() : null)
+        ));
     }
 
     /**
@@ -1716,7 +1728,7 @@ class PendingRequest
      *
      * @phpstan-self-out self<T>
      */
-    public function async(bool $async = true)
+    public function async(bool $async = true): static
     {
         $this->async = $async;
 
@@ -1728,7 +1740,7 @@ class PendingRequest
      *
      * @return \GuzzleHttp\Promise\PromiseInterface|null
      */
-    public function getPromise()
+    public function getPromise(): ?PromiseInterface
     {
         return $this->promise;
     }
@@ -1885,7 +1897,7 @@ class PendingRequest
      * @param  callable  $handler
      * @return $this
      */
-    public function setHandler($handler)
+    public function setHandler(callable $handler): static
     {
         $this->handler = $handler;
 

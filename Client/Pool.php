@@ -38,7 +38,7 @@ class Pool
     public function __construct(?Factory $factory = null)
     {
         $this->factory = $factory ?: new Factory();
-        $this->handler = Utils::chooseHandler();
+        $this->handler = $this->factory->loopHandler() ?? Utils::chooseHandler();
     }
 
     /**
