@@ -10,6 +10,8 @@ use GuzzleHttp\Promise\PromiseInterface;
 use GuzzleHttp\Psr7\Response as Psr7Response;
 use GuzzleHttp\TransferStats;
 use Voyager\Contracts\Events\Dispatcher;
+use Voyager\Contracts\IOPools\Loop;
+use Voyager\Http\Async\HttpAsyncManager;
 use Voyager\NutsAndBolts\Collection;
 use Voyager\NutsAndBolts\DataObjects\Str;
 use Voyager\NutsAndBolts\Concerns\Macroable;
@@ -91,12 +93,33 @@ class Factory
      * Create a new factory instance.
      *
      * @param  \Voyager\Contracts\Events\Dispatcher|null  $dispatcher
+     * @param  \Voyager\Http\Async\HttpAsyncManager|null  $async
      */
-    public function __construct(?Dispatcher $dispatcher = null)
+    public function __construct(?Dispatcher $dispatcher = null, private readonly ?HttpAsyncManager $async = null)
     {
         $this->dispatcher = $dispatcher;
 
         $this->stubCallbacks = new Collection;
+    }
+
+    /**
+     * The loop-aware bottom handler for async sends, or null when no loop is bound.
+     *
+     * @return callable|null
+     */
+    public function loopHandler(): ?callable
+    {
+        return $this->async?->handler();
+    }
+
+    /**
+     * The loop async sends ride, or null when none is bound.
+     *
+     * @return \Voyager\Contracts\IOPools\Loop|null
+     */
+    public function loop(): ?Loop
+    {
+        return $this->async?->loop();
     }
 
     /**
