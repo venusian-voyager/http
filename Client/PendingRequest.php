@@ -1044,10 +1044,14 @@ class PendingRequest
 
             // Pool and Batch hand in their own handler and build lazily to keep their concurrency cap.
             // A bare async() send on a bound loop starts now, and a failure rejects instead of resolving to it.
+            // The loop adopts the bare Guzzle promise, never the FluentPromise: its then() chains in place,
+            // so the loop's own recorder would feed every later then() its void return.
             if (is_null($this->handler) && ! is_null($loop = $this->factory?->loop())) {
-                return $loop->adopt($this->promise->buildPromise()->then(
+                $promise = $this->promise->buildPromise()->then(
                     static fn ($result) => $result instanceof Throwable ? throw $result : $result
-                ));
+                );
+
+                return $loop->adopt($promise instanceof FluentPromise ? $promise->getGuzzlePromise() : $promise);
             }
 
             return $this->promise;
