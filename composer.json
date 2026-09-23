@@ -2,7 +2,6 @@
     "name": "venusian-voyager/http",
     "description": "The Voyager HTTP client package.",
     "license": "MIT",
-    "version": "0.9.0",
     "authors": [
         {
             "name": "Angel Gonzalez",
