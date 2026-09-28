@@ -4,21 +4,38 @@ namespace Voyager\Http\Async;
 
 use CurlMultiHandle;
 use GuzzleHttp\Handler\CurlFactory;
+use GuzzleHttp\Promise\Utils;
 use Pcurl\Multi;
 use Voyager\Contracts\IOPools\Loop;
-use Voyager\Contracts\IOPools\LoopTimer;
-use Voyager\Contracts\IOPools\StreamWatchable;
+use Voyager\Contracts\IOPools\LoopResources\Deadlined;
+use Voyager\IOPools\Resources\WakeSource;
+use Voyager\IOPools\Waiter\Wakes\Readable;
+use Voyager\IOPools\Waiter\Wakes\Writable;
 use Voyager\Http\Async\Concerns\TracksInFlight;
 use Voyager\Http\Client\HttpClientException;
 
-/** curl's sockets handed to the loop as streams via ext-pcurl. Ticks only when one fires or curl's timer says so. */
-final class LoopPcurlHandler implements StreamWatchable
+/**
+ * curl's multi interface driven by its socket and timer callbacks, which pcurl binds. Every socket
+ * curl opens joins the loop's wait for exactly the direction curl asked for, and curl's timer is
+ * this resource's own deadline, so a transfer wakes the loop the moment it can move, like any other
+ * wake source.
+ */
+final class LoopPcurlHandler extends WakeSource implements Deadlined
 {
     use TracksInFlight { add as private addHandle; }
 
-    /** @var array<int, resource> fd => dup'd stream */
+    /**
+     * @var array<int, array{stream: resource, what: int}> fd => the stream the loop waits on, and the CURL_POLL_* curl asked for
+     */
     private array $sockets = [];
-    private ?LoopTimer $timer = null;
+
+    /**
+     * @var array<int, int> stream id => curl's fd
+     */
+    private array $fds = [];
+
+    /** Absolute hrtime(true) curl wants its timeout action at, or null when it wants none. */
+    private ?int $due_at = null;
 
     public function __construct(
         private readonly Loop $loop,
@@ -30,20 +47,57 @@ final class LoopPcurlHandler implements StreamWatchable
         return AsyncResource::PCURL;
     }
 
-    public function streams(): array
+    public function wakes(): array
     {
-        return array_values($this->sockets);
+        $wakes = [];
+
+        foreach ($this->sockets as ['stream' => $stream, 'what' => $what]) {
+            if ($what & PcurlPoll::IN->value) {
+                $wakes[] = new Readable($stream);
+            }
+
+            if ($what & PcurlPoll::OUT->value) {
+                $wakes[] = new Writable($stream);
+            }
+        }
+
+        return $wakes;
     }
 
-    public function tick(): void
+    public function woke(array $fired): void
     {
-        // the loop says "something fired", not which fd; bitmask 0 lets libcurl find out
-        foreach (array_keys($this->sockets) as $fd)
-        {
-            Multi::curlMultiSocketAction($this->multi(), $fd, 0);
+        $bits = [];
+
+        foreach ($fired as $wake) {
+            if (! is_null($fd = $this->fds[(int) $wake->stream] ?? null)) {
+                $bits[$fd] = ($bits[$fd] ?? 0) | ($wake instanceof Writable ? PcurlSelect::OUT->value : PcurlSelect::IN->value);
+            }
+        }
+
+        foreach ($bits as $fd => $mask) {
+            // An earlier action this turn may have had curl let go of the socket.
+            if (isset($this->sockets[$fd])) {
+                Multi::curlMultiSocketAction($this->multi(), $fd, $mask);
+            }
         }
 
         $this->harvest();
+        Utils::queue()->run();
+    }
+
+    public function dueAt(): ?int
+    {
+        return $this->due_at;
+    }
+
+    public function fire(): void
+    {
+        // Cleared first: the action runs curl's timer callback, which sets the next one.
+        $this->due_at = null;
+        Multi::curlMultiSocketAction($this->multi(), PcurlSocket::TIMEOUT->value, 0);
+
+        $this->harvest();
+        Utils::queue()->run();
     }
 
     private function add(int $id): void
@@ -55,67 +109,50 @@ final class LoopPcurlHandler implements StreamWatchable
 
     private function onSocket(int $fd, int $what): void
     {
-        if ($what === PcurlPoll::REMOVE->value)
-        {
-            if (isset($this->sockets[$fd])) { fclose($this->sockets[$fd]); unset($this->sockets[$fd]); }
+        if ($what === PcurlPoll::REMOVE->value) {
+            if (isset($this->sockets[$fd])) {
+                unset($this->fds[(int) $this->sockets[$fd]['stream']]);
+                fclose($this->sockets[$fd]['stream']);
+                unset($this->sockets[$fd]);
+            }
+
             return;
         }
 
-        if (! isset($this->sockets[$fd]))
-        {
+        if (! isset($this->sockets[$fd])) {
+            // A stream of its own on curl's descriptor, for the loop to wait on.
             $stream = fopen('php://fd/'.$fd, 'r+');
-            if ($stream === false)
-            {
-                throw new HttpClientException('php://fd/'.$fd.' failed');
+
+            if ($stream === false) {
+                throw new HttpClientException("curl opened fd {$fd}, and php://fd/{$fd} could not be opened on it.");
             }
 
-            $this->sockets[$fd] = $stream;
+            $this->sockets[$fd] = ['stream' => $stream, 'what' => $what];
+            $this->fds[(int) $stream] = $fd;
+
+            return;
         }
 
-        // The loop selects streams for read only. A socket curl marked writable has to be
-        // serviced on the next turn, or the transfer sits until curl's connect timeout.
-        if ($what === PcurlPoll::OUT->value || $what === PcurlPoll::INOUT->value)
-        {
-            $bits = $what === PcurlPoll::INOUT->value
-                ? PcurlSelect::IN->value | PcurlSelect::OUT->value
-                : PcurlSelect::OUT->value;
-
-            $this->loop->at(0, function () use ($fd, $bits) {
-                if (! isset($this->sockets[$fd])) { return; }
-
-                Multi::curlMultiSocketAction($this->multi(), $fd, $bits);
-                $this->harvest();
-            });
-        }
+        $this->sockets[$fd]['what'] = $what;
     }
 
     private function onTimer(int $timeout_ms): void
     {
-        $this->timer?->cancel();
-        $this->timer = null;
-
-        if ($timeout_ms < 0) { return; }
-
-        $this->timer = $this->loop->at(max(0, $timeout_ms) / 1000, function () {
-            $this->timer = null;
-            Multi::curlMultiSocketAction($this->multi(), PcurlSocket::TIMEOUT->value, 0);
-            $this->harvest();
-        });
+        $this->due_at = $timeout_ms < 0 ? null : hrtime(true) + $timeout_ms * 1_000_000;
     }
 
     private function multi(): CurlMultiHandle
     {
-        if (is_null($this->multi))
-        {
+        if (is_null($this->multi)) {
             $this->multi = curl_multi_init();
+
             $this->setopt(PcurlOption::SOCKET_FUNCTION->value, function ($easy, int $fd, int $what, $clientp, $socketp): int {
                 $this->onSocket($fd, $what);
-
                 return 0;
             });
+
             $this->setopt(PcurlOption::TIMER_FUNCTION->value, function ($multi, int $timeout_ms, $clientp): int {
                 $this->onTimer($timeout_ms);
-
                 return 0;
             });
         }
@@ -126,8 +163,8 @@ final class LoopPcurlHandler implements StreamWatchable
     private function setopt(int $option, callable $callback): void
     {
         $code = Multi::curlMultiSetopt($this->multi, $option, $callback);
-        if ($code !== 0)
-        {
+
+        if ($code !== 0) {
             throw new HttpClientException('curl_multi_setopt: '.Multi::curlMultiStrerror($code));
         }
     }
