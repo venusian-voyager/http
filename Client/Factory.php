@@ -9,7 +9,7 @@ use GuzzleHttp\Promise\Create;
 use GuzzleHttp\Promise\PromiseInterface;
 use GuzzleHttp\Psr7\Response as Psr7Response;
 use GuzzleHttp\TransferStats;
-use Voyager\Contracts\Events\Dispatcher;
+use Voyager\Contracts\Signals\SignalDispatcher as Dispatcher;
 use Voyager\Contracts\IOPools\Loop;
 use Voyager\Http\Async\HttpAsyncManager;
 use Voyager\NutsAndBolts\Collection;
@@ -29,7 +29,7 @@ class Factory
     /**
      * The event dispatcher implementation.
      *
-     * @var \Voyager\Contracts\Events\Dispatcher|null
+     * @var \Voyager\Contracts\Signals\SignalDispatcher|null
      */
     protected $dispatcher;
 
@@ -92,7 +92,7 @@ class Factory
     /**
      * Create a new factory instance.
      *
-     * @param  \Voyager\Contracts\Events\Dispatcher|null  $dispatcher
+     * @param  \Voyager\Contracts\Signals\SignalDispatcher|null  $dispatcher
      * @param  \Voyager\Http\Async\HttpAsyncManager|null  $async
      */
     public function __construct(?Dispatcher $dispatcher = null, private readonly ?HttpAsyncManager $async = null)
@@ -573,7 +573,7 @@ class Factory
     /**
      * Get the current event dispatcher implementation.
      *
-     * @return \Voyager\Contracts\Events\Dispatcher|null
+     * @return \Voyager\Contracts\Signals\SignalDispatcher|null
      */
     public function getDispatcher()
     {
