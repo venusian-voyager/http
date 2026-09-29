@@ -12,8 +12,6 @@ final class HttpServiceProvider extends ServiceProvider implements DeferrablePro
 {
     public function register(): void
     {
-        $this->mergeConfigFrom(__DIR__.'/config/http.php', 'http');
-
         $this->app->registerSingleton('http.async', fn (FrameworkCore $app) => new HttpAsyncManager($app));
         $this->app->registerSingleton('http', fn (FrameworkCore $app) => new Factory(null, $app['http.async']));
     }
