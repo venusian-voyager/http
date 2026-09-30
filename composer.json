@@ -14,15 +14,22 @@
     "require": {
         "php": "^8.4|^8.5",
         "guzzlehttp/guzzle": "^7.9",
+        "guzzlehttp/promises": "^2.0",
+        "guzzlehttp/psr7": "^2.7",
         "guzzlehttp/uri-template": "^1.0",
-        "venusian-voyager/collections": "^0.9.0",
-        "venusian-voyager/contracts": "^0.9.0",
-        "venusian-voyager/io-pools": "^0.9.0",
-        "venusian-voyager/macroable": "^0.9.0",
-        "venusian-voyager/nuts-and-bolts": "^0.9.0"
+        "nesbot/carbon": "^3.8.4",
+        "psr/http-message": "^1.1|^2.0",
+        "venusian-voyager/collections": "^0.10.0",
+        "venusian-voyager/conditionable": "^0.10.0",
+        "venusian-voyager/contracts": "^0.10.0",
+        "venusian-voyager/io-pools": "^0.10.0",
+        "venusian-voyager/macroable": "^0.10.0",
+        "venusian-voyager/nuts-and-bolts": "^0.10.0"
     },
     "suggest": {
-        "ext-pcurl": "Loop-watched curl sockets for the pcurl async driver"
+        "ext-curl": "Required for the curl async driver.",
+        "ext-pcurl": "Required for the pcurl async driver: curl's own sockets wait on the loop.",
+        "symfony/var-dumper": "Required for dd() and dump() on requests and responses (^8.0.0)."
     },
     "autoload": {
         "psr-4": {
@@ -31,7 +38,7 @@
     },
     "extra": {
         "branch-alias": {
-            "dev-main": "0.9.x-dev"
+            "dev-main": "0.10.x-dev"
         }
     },
     "config": {

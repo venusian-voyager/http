@@ -11,7 +11,7 @@ final class HttpAsyncManager extends Manager
 {
     public function getDefaultDriver(): ?string
     {
-        return $this->config->get('http.async.default', 'curl');
+        return $this->config->get('http.async.default', 'auto');
     }
 
     public function loop(): ?Loop
@@ -23,6 +23,12 @@ final class HttpAsyncManager extends Manager
     public function handler(): ?callable
     {
         return is_null($this->loop()) ? null : $this->driver();
+    }
+
+    /** pcurl when the extension is loaded: it waits on curl's sockets. ext-curl's blind driver otherwise. */
+    public function createAutoDriver(): LoopCurlHandler|LoopPcurlHandler
+    {
+        return extension_loaded('pcurl') ? $this->createPcurlDriver() : $this->createCurlDriver();
     }
 
     public function createCurlDriver(): LoopCurlHandler
