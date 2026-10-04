@@ -22,12 +22,27 @@ use Voyager\Http\Client\HttpClientException;
  */
 final class LoopPcurlHandler extends WakeSource implements Deadlined
 {
-    use TracksInFlight { add as private addHandle; }
+    use TracksInFlight { add as private addHandle; forgetWhenIdle as private forgetHandler; }
 
     /**
      * @var array<int, array{stream: resource, what: int}> fd => the stream the loop waits on, and the CURL_POLL_* curl asked for
      */
     private array $sockets = [];
+
+    /**
+     * Streams curl let go of since the last wakes() call. Still open: the waiter drops a stream from
+     * its set only while the stream is open, and curl may keep the socket for its next request.
+     *
+     * @var list<resource>
+     */
+    private array $retired = [];
+
+    /**
+     * Streams the last sync no longer declared, so the waiter has dropped them: safe to close.
+     *
+     * @var list<resource>
+     */
+    private array $closing = [];
 
     /**
      * @var array<int, int> stream id => curl's fd
@@ -49,6 +64,11 @@ final class LoopPcurlHandler extends WakeSource implements Deadlined
 
     public function wakes(): array
     {
+        // The waiter syncs right after this call: what the last sync dropped can close now, and what
+        // curl released since then is dropped by this one.
+        $this->close($this->closing);
+        [$this->closing, $this->retired] = [$this->retired, []];
+
         $wakes = [];
 
         foreach ($this->sockets as ['stream' => $stream, 'what' => $what]) {
@@ -87,6 +107,12 @@ final class LoopPcurlHandler extends WakeSource implements Deadlined
 
     public function dueAt(): ?int
     {
+        // Idle yet still here: streams are left to close. Already due, so each turn's sync drops or
+        // closes them and fire() checks again whether the handler can leave.
+        if ($this->registered && $this->in_flight === []) {
+            return 0;
+        }
+
         return $this->due_at;
     }
 
@@ -111,8 +137,10 @@ final class LoopPcurlHandler extends WakeSource implements Deadlined
     {
         if ($what === PcurlPoll::REMOVE->value) {
             if (isset($this->sockets[$fd])) {
+                // Not closed yet: under epoll, a closed duplicate of a socket curl keeps stays in the
+                // set, and the next duplicate of that socket fails to join it.
+                $this->retired[] = $this->sockets[$fd]['stream'];
                 unset($this->fds[(int) $this->sockets[$fd]['stream']]);
-                fclose($this->sockets[$fd]['stream']);
                 unset($this->sockets[$fd]);
             }
 
@@ -134,6 +162,29 @@ final class LoopPcurlHandler extends WakeSource implements Deadlined
         }
 
         $this->sockets[$fd]['what'] = $what;
+    }
+
+    /**
+     * Idle, the handler leaves the loop only once wakes() has closed every stream curl let go of:
+     * until then it stays, due at once (see dueAt()), so the next syncs drop and close them.
+     */
+    private function forgetWhenIdle(): void
+    {
+        if ($this->retired === [] && $this->closing === []) {
+            $this->forgetHandler();
+        }
+    }
+
+    /**
+     * @param list<resource> $streams
+     */
+    private function close(array $streams): void
+    {
+        foreach ($streams as $stream) {
+            if (is_resource($stream)) {
+                fclose($stream);
+            }
+        }
     }
 
     private function onTimer(int $timeout_ms): void
