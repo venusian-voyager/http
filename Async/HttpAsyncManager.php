@@ -28,7 +28,13 @@ final class HttpAsyncManager extends Manager
     /** pcurl when the extension is loaded: it waits on curl's sockets. ext-curl's blind driver otherwise. */
     public function createAutoDriver(): LoopCurlHandler|LoopPcurlHandler
     {
-        return extension_loaded('pcurl') ? $this->createPcurlDriver() : $this->createCurlDriver();
+        return $this->autoDriver() === 'pcurl' ? $this->createPcurlDriver() : $this->createCurlDriver();
+    }
+
+    /** The driver `auto` picks: pcurl when the extension is loaded, curl otherwise. */
+    public function autoDriver(): string
+    {
+        return extension_loaded('pcurl') ? 'pcurl' : 'curl';
     }
 
     public function createCurlDriver(): LoopCurlHandler
