@@ -148,12 +148,9 @@ final class LoopPcurlHandler extends WakeSource implements Deadlined
         }
 
         if (! isset($this->sockets[$fd])) {
-            // A stream of its own on curl's descriptor, for the loop to wait on.
-            $stream = fopen('php://fd/'.$fd, 'r+');
-
-            if ($stream === false) {
-                throw new HttpClientException("curl opened fd {$fd}, and php://fd/{$fd} could not be opened on it.");
-            }
+            // A stream of its own on curl's descriptor, for the loop to wait on. pcurl dups the
+            // descriptor the way php://fd does, in every SAPI; php://fd is CLI-only.
+            $stream = Multi::curlSocketStream($fd);
 
             $this->sockets[$fd] = ['stream' => $stream, 'what' => $what];
             $this->fds[(int) $stream] = $fd;
