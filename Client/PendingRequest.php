@@ -755,7 +755,7 @@ class PendingRequest
     /**
      * Add a new callback to execute after the response is built.
      *
-     * @param  (callable(\Voyager\Http\Client\Response): \Voyager\Http\Client\Response|null)  $callback
+     * @param  (callable(\Voyager\Http\Client\Response): (\Voyager\Http\Client\Response|null))  $callback
      * @return $this
      */
     public function afterResponse(callable $callback)
@@ -1737,7 +1737,7 @@ class PendingRequest
      * @template T of bool = true
      *
      * @param  T  $async
-     * @return self<T>
+     * @return $this
      *
      * @phpstan-self-out self<T>
      */
