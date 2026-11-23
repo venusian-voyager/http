@@ -6,5 +6,5 @@ namespace Voyager\Http\Async;
 enum AsyncResource: string
 {
     case CURL = 'http.curl';
-    case PCURL = 'http.pcurl';
+    case MULTICURL = 'http.multicurl';
 }

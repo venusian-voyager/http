@@ -5,7 +5,7 @@ namespace Voyager\Http\Async;
 use CurlMultiHandle;
 use GuzzleHttp\Handler\CurlFactory;
 use GuzzleHttp\Promise\Utils;
-use Pcurl\Multi;
+use Multicurl\Multi;
 use Voyager\Contracts\IOPools\Loop;
 use Voyager\Contracts\IOPools\LoopResources\Deadlined;
 use Voyager\IOPools\Resources\WakeSource;
@@ -15,12 +15,12 @@ use Voyager\Http\Async\Concerns\TracksInFlight;
 use Voyager\Http\Client\HttpClientException;
 
 /**
- * curl's multi interface driven by its socket and timer callbacks, which pcurl binds. Every socket
+ * curl's multi interface driven by its socket and timer callbacks, which multicurl binds. Every socket
  * curl opens joins the loop's wait for exactly the direction curl asked for, and curl's timer is
  * this resource's own deadline, so a transfer wakes the loop the moment it can move, like any other
  * wake source.
  */
-final class LoopPcurlHandler extends WakeSource implements Deadlined
+final class LoopMulticurlHandler extends WakeSource implements Deadlined
 {
     use TracksInFlight { add as private addHandle; forgetWhenIdle as private forgetHandler; }
 
@@ -59,7 +59,7 @@ final class LoopPcurlHandler extends WakeSource implements Deadlined
 
     protected function name(): AsyncResource
     {
-        return AsyncResource::PCURL;
+        return AsyncResource::MULTICURL;
     }
 
     public function wakes(): array
@@ -72,11 +72,11 @@ final class LoopPcurlHandler extends WakeSource implements Deadlined
         $wakes = [];
 
         foreach ($this->sockets as ['stream' => $stream, 'what' => $what]) {
-            if ($what & PcurlPoll::IN->value) {
+            if ($what & MulticurlPoll::IN->value) {
                 $wakes[] = new Readable($stream);
             }
 
-            if ($what & PcurlPoll::OUT->value) {
+            if ($what & MulticurlPoll::OUT->value) {
                 $wakes[] = new Writable($stream);
             }
         }
@@ -90,7 +90,7 @@ final class LoopPcurlHandler extends WakeSource implements Deadlined
 
         foreach ($fired as $wake) {
             if (! is_null($fd = $this->fds[(int) $wake->stream] ?? null)) {
-                $bits[$fd] = ($bits[$fd] ?? 0) | ($wake instanceof Writable ? PcurlSelect::OUT->value : PcurlSelect::IN->value);
+                $bits[$fd] = ($bits[$fd] ?? 0) | ($wake instanceof Writable ? MulticurlSelect::OUT->value : MulticurlSelect::IN->value);
             }
         }
 
@@ -120,7 +120,7 @@ final class LoopPcurlHandler extends WakeSource implements Deadlined
     {
         // Cleared first: the action runs curl's timer callback, which sets the next one.
         $this->due_at = null;
-        Multi::curlMultiSocketAction($this->multi(), PcurlSocket::TIMEOUT->value, 0);
+        Multi::curlMultiSocketAction($this->multi(), MulticurlSocket::TIMEOUT->value, 0);
 
         $this->harvest();
         Utils::queue()->run();
@@ -129,13 +129,13 @@ final class LoopPcurlHandler extends WakeSource implements Deadlined
     private function add(int $id): void
     {
         $this->addHandle($id);
-        Multi::curlMultiSocketAction($this->multi(), PcurlSocket::TIMEOUT->value, 0);
+        Multi::curlMultiSocketAction($this->multi(), MulticurlSocket::TIMEOUT->value, 0);
         $this->harvest();
     }
 
     private function onSocket(int $fd, int $what): void
     {
-        if ($what === PcurlPoll::REMOVE->value) {
+        if ($what === MulticurlPoll::REMOVE->value) {
             if (isset($this->sockets[$fd])) {
                 // Not closed yet: under epoll, a closed duplicate of a socket curl keeps stays in the
                 // set, and the next duplicate of that socket fails to join it.
@@ -148,7 +148,7 @@ final class LoopPcurlHandler extends WakeSource implements Deadlined
         }
 
         if (! isset($this->sockets[$fd])) {
-            // A stream of its own on curl's descriptor, for the loop to wait on. pcurl dups the
+            // A stream of its own on curl's descriptor, for the loop to wait on. multicurl dups the
             // descriptor the way php://fd does, in every SAPI; php://fd is CLI-only.
             $stream = Multi::curlSocketStream($fd);
 
@@ -194,12 +194,12 @@ final class LoopPcurlHandler extends WakeSource implements Deadlined
         if (is_null($this->multi)) {
             $this->multi = curl_multi_init();
 
-            $this->setopt(PcurlOption::SOCKET_FUNCTION->value, function ($easy, int $fd, int $what, $clientp, $socketp): int {
+            $this->setopt(MulticurlOption::SOCKET_FUNCTION->value, function ($easy, int $fd, int $what, $clientp, $socketp): int {
                 $this->onSocket($fd, $what);
                 return 0;
             });
 
-            $this->setopt(PcurlOption::TIMER_FUNCTION->value, function ($multi, int $timeout_ms, $clientp): int {
+            $this->setopt(MulticurlOption::TIMER_FUNCTION->value, function ($multi, int $timeout_ms, $clientp): int {
                 $this->onTimer($timeout_ms);
                 return 0;
             });

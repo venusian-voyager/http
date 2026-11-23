@@ -28,7 +28,7 @@
     },
     "suggest": {
         "ext-curl": "Required for the curl async driver.",
-        "ext-pcurl": "Required for the pcurl async driver: curl's own sockets wait on the loop.",
+        "ext-multicurl": "Required for the multicurl async driver: curl's own sockets wait on the loop.",
         "symfony/var-dumper": "Required for dd() and dump() on requests and responses (^8.0.0)."
     },
     "autoload": {

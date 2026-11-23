@@ -25,16 +25,16 @@ final class HttpAsyncManager extends Manager
         return is_null($this->loop()) ? null : $this->driver();
     }
 
-    /** pcurl when the extension is loaded: it waits on curl's sockets. ext-curl's blind driver otherwise. */
-    public function createAutoDriver(): LoopCurlHandler|LoopPcurlHandler
+    /** multicurl when the extension is loaded: it waits on curl's sockets. ext-curl's blind driver otherwise. */
+    public function createAutoDriver(): LoopCurlHandler|LoopMulticurlHandler
     {
-        return $this->autoDriver() === 'pcurl' ? $this->createPcurlDriver() : $this->createCurlDriver();
+        return $this->autoDriver() === 'multicurl' ? $this->createMulticurlDriver() : $this->createCurlDriver();
     }
 
-    /** The driver `auto` picks: pcurl when the extension is loaded, curl otherwise. */
+    /** The driver `auto` picks: multicurl when the extension is loaded, curl otherwise. */
     public function autoDriver(): string
     {
-        return extension_loaded('pcurl') ? 'pcurl' : 'curl';
+        return extension_loaded('multicurl') ? 'multicurl' : 'curl';
     }
 
     public function createCurlDriver(): LoopCurlHandler
@@ -44,15 +44,15 @@ final class HttpAsyncManager extends Manager
         return new LoopCurlHandler($this->loop(), new CurlFactory($c['max_handles'] ?? 50), $c['multi_options'] ?? []);
     }
 
-    public function createPcurlDriver(): LoopPcurlHandler
+    public function createMulticurlDriver(): LoopMulticurlHandler
     {
-        if (! extension_loaded('pcurl'))
+        if (! extension_loaded('multicurl'))
         {
-            throw new HttpClientException('The pcurl extension is not loaded.');
+            throw new HttpClientException('The multicurl extension is not loaded.');
         }
 
-        $c = $this->config->get('http.async.drivers.pcurl', []);
+        $c = $this->config->get('http.async.drivers.multicurl', []);
 
-        return new LoopPcurlHandler($this->loop(), new CurlFactory($c['max_handles'] ?? 50));
+        return new LoopMulticurlHandler($this->loop(), new CurlFactory($c['max_handles'] ?? 50));
     }
 }

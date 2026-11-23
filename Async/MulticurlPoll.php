@@ -2,8 +2,8 @@
 
 namespace Voyager\Http\Async;
 
-/** libcurl CURL_POLL_* values. Kept in userland; ext-pcurl defines none. */
-enum PcurlPoll: int
+/** libcurl CURL_POLL_* values. Kept in userland; ext-multicurl defines none. */
+enum MulticurlPoll: int
 {
     case NONE = 0;
     case IN = 1;
